@@ -1,0 +1,3 @@
+# fgds
+
+Fgds is a GPU direct storage access tool that provides a kernel module and a user-space library, supporting data transfer between NVMe SSDs and GPU memory using POSIX-compatible APIs.
