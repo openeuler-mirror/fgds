@@ -101,6 +101,19 @@ Before the disk bandwidth is saturated, the read/write performance comparison is
 | PyTorch FGDS API | [pytorch-fgds/README.md](./pytorch-fgds/README.md) |
 | Micro benchmark | [docs/micro-benchmark.md](./docs/micro-benchmark.md) |
 
+## News
+
+- **2026-08-10** — Open-sourced to the openEuler community
+- **2026-06-03** — Significantly improved read/write performance with io_uring
+- **2026-04-21** — Fixed a resource leak bug and performed some code optimizations
+- **2026-03-11** — Added PyTorch FGDS API as a drop-in replacement for PyTorch GDS API in scenarios such as checkpoint saving
+- **2026-02-07** — Fixed kernel module load failures
+- **2026-01-28** — Added support for multi-GPU, multi-user environments
+- **2026-01-13** — Improved test programs and scripts
+- **2025-12-18** — Added the FGDS backend for LMCache, enabling vLLM to utilize FGDS for KV cache offloading
+- **2025-11-25** — Added FGDS Python API
+- **2025-11-06** — Cloned from [Phoenix](https://github.com/nicexlab/phoenix) at commit [`798208d`](https://github.com/nicexlab/phoenix/tree/798208d720b234954fef433b306a485093350e2a)
+
 ## Copyright & LICENSE
 
 `SPDX-License-Identifier: Apache-2.0`
