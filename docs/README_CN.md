@@ -101,6 +101,19 @@ close(fd);
 | PyTorch FGDS API | [pytorch-fgds/README.md](./pytorch-fgds/README.md) |
 | 微benchmark | [docs/micro-benchmark.md](./docs/micro-benchmark.md) |
 
+## 新闻
+
+- **2026-08-10** — 正式开源到 openEuler 社区
+- **2026-06-03** — 基于 io_uring 大幅提升读写性能
+- **2026-04-21** — 修复资源泄露问题并进行了一些代码优化
+- **2026-03-11** — 新增 PyTorch FGDS API，作为 PyTorch GDS API 的直接替代，可用于 checkpoint 保存等场景
+- **2026-02-07** — 修复内核模块加载失败问题
+- **2026-01-28** — 新增对多卡多用户环境的支持
+- **2026-01-13** — 完善测试程序和相关脚本
+- **2025-12-18** — 新增 FGDS 的 LMCache 后端，使 vLLM 可利用 FGDS 进行 KV cache 卸载
+- **2025-11-25** — 新增 FGDS Python API
+- **2025-11-06** — 基于 [Phoenix](https://github.com/nicexlab/phoenix) 的 commit [`798208d`](https://github.com/nicexlab/phoenix/tree/798208d720b234954fef433b306a485093350e2a) 进行修改
+
 ## Copyright & LICENSE
 
 `SPDX-License-Identifier: Apache-2.0`
