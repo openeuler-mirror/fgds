@@ -103,7 +103,7 @@ Before the disk bandwidth is saturated, the read/write performance comparison is
 
 ## News
 
-- **2026-08-10** — Open-sourced to the openEuler community
+- **2026-07-28** — Open-sourced to the openEuler community
 - **2026-06-03** — Significantly improved read/write performance with io_uring
 - **2026-04-21** — Fixed a resource leak bug and performed some code optimizations
 - **2026-03-11** — Added PyTorch FGDS API as a drop-in replacement for PyTorch GDS API in scenarios such as checkpoint saving
