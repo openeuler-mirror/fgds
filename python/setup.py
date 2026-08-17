@@ -31,9 +31,10 @@ setup(
     url='https://github.com/Storage-and-OS-for-AI/fgds',
     classifiers=[
         'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.10',
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: OS Independent',
     ],
-    python_requires='>=3.7',
+    python_requires='>=3.10',
 )
 

@@ -6,10 +6,11 @@ This directory contains FGDS documentation. Below is an overview of the project'
 
 | File | Description |
 |------|-------------|
-| [install.md](install.md) | Build and installation guide |
+| [getting-started.md](getting-started.md) | Build and run guide |
 | [fgds-fs.md](fgds-fs.md) | Kernel module (`fgdsfs.ko`) internals — char device, mmap, ioctl |
 | [libfgds.md](libfgds.md) | Userspace library API reference |
 | [micro-benchmark.md](micro-benchmark.md) | Micro benchmark program |
+| [troubleshooting.md](troubleshooting.md) | Troubleshooting guide for common issues |
 
 ## Source Tree
 
