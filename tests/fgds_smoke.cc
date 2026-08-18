@@ -1,6 +1,5 @@
 /*
  * fgds_smoke: fgds GPU<->NVMe 读写数据一致性校验（冒烟测试）。
- * 从 example.cc 拆出的 fgds_check_1~2，独立编译为 fgds_smoke 二进制。
  */
 #include <sys/types.h>
 #include <sys/stat.h>

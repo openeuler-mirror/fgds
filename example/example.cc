@@ -7,10 +7,10 @@
  * fgds_demo            注册后拿到 target_addr，直接当作 pread/pwrite 的缓冲区。
  * fgds_read_write_demo 使用 fgds_read/fgds_write 接口完成 文件<->显存 的搬移。
  *
- * 用法：./example <gpu_id> <file_path>
+ * 用法：./example <gpu_id> <file_path>  （file_path 指向一个 4MB 文件）
+ * 注意：file_path 需在支持 O_DIRECT 的文件系统上（本地 NVMe/SSD，非 /tmp）。
+ * 注意：demo 会原位回写输入文件，请用一次性测试文件。
  */
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
@@ -18,32 +18,23 @@
 #include <cuda_runtime.h>
 #include "fgds.h"
 
-// 示例 1：注册显存后，把返回的 target_addr 直接作为 pread/pwrite 的缓冲区。
-int fgds_demo(int device_id, const char *file_path) {
-    const size_t io_size = 1 << 20;  // 演示只搬 1MB
+// 本示例以读写一个 4MB 文件为例（4MB 是 64KB 的整数倍，满足 fgds_regmem 对齐要求）。
+#define IO_SIZE (4 * 1024 * 1024)
 
-    char dst_path[512] = {0};
-    int src_fd = -1;
-    int dst_fd = -1;
+// 示例 1：注册显存后，把返回的 target_addr 直接作为 pread/pwrite 的缓冲区。
+// 从文件读入 GPU 显存，再写回同一个文件。
+int fgds_demo(int device_id, const char *file_path) {
+    const size_t io_size = IO_SIZE;
+
+    int fd = -1;
     void *gpu_buf = NULL;
     void *target_addr = NULL;
     cudaError_t cuda_err;
     int ret = 1;
 
-    src_fd = open(file_path, O_RDONLY | O_DIRECT);
-    if (src_fd < 0) {
-        perror("open source file");
-        goto cleanup;
-    }
-
-    snprintf(dst_path, sizeof(dst_path), "%s_fgds_demo", file_path);
-    dst_fd = open(dst_path, O_CREAT | O_WRONLY | O_TRUNC | O_DIRECT, 0644);
-    if (dst_fd < 0) {
-        perror("open dest file");
-        goto cleanup;
-    }
-    if (ftruncate(dst_fd, (off_t)io_size) != 0) {
-        perror("ftruncate dest file");
+    fd = open(file_path, O_RDWR | O_DIRECT);
+    if (fd < 0) {
+        perror("open file");
         goto cleanup;
     }
 
@@ -64,11 +55,11 @@ int fgds_demo(int device_id, const char *file_path) {
     }
 
     // target_addr 是注册后得到的映射地址，可直接作为 pread/pwrite 的缓冲区
-    if (pread(src_fd, target_addr, io_size, 0) != (ssize_t)io_size) {
+    if (pread(fd, target_addr, io_size, 0) != (ssize_t)io_size) {
         perror("pread to GPU memory");
         goto cleanup;
     }
-    if (pwrite(dst_fd, target_addr, io_size, 0) != (ssize_t)io_size) {
+    if (pwrite(fd, target_addr, io_size, 0) != (ssize_t)io_size) {
         perror("pwrite from GPU memory");
         goto cleanup;
     }
@@ -80,48 +71,24 @@ cleanup:
     if (target_addr) fgds_deregmem(device_id, gpu_buf, io_size);
     if (gpu_buf) cudaFree(gpu_buf);
     fgds_close(device_id);
-    if (src_fd >= 0) close(src_fd);
-    if (dst_fd >= 0) close(dst_fd);
-    if (ret != 0 && dst_fd >= 0) unlink(dst_path);
+    if (fd >= 0) close(fd);
     return ret;
 }
 
-// 示例 2：使用 fgds_read/fgds_write 把整个源文件搬进显存，再写出到目标文件。
+// 示例 2：使用 fgds_read/fgds_write 把数据搬进显存，再写回同一个文件。
 int fgds_read_write_demo(int device_id, const char *file_path) {
-    struct stat st;
-    char dst_path[512] = {0};
-    int src_fd = -1;
-    int dst_fd = -1;
+    const size_t io_size = IO_SIZE;
+
+    int fd = -1;
     void *gpu_buf = NULL;
     void *target_addr = NULL;
-    fgds_fileid_t src_fid, dst_fid;
+    fgds_fileid_t fid;
     cudaError_t cuda_err;
     int ret = 1;
 
-    if (stat(file_path, &st) < 0) {
-        perror("stat source file");
-        return 1;
-    }
-    size_t io_size = (size_t)st.st_size;  // 整个文件大小
-    if (io_size == 0) {
-        fprintf(stderr, "source file is empty\n");
-        return 1;
-    }
-
-    src_fd = open(file_path, O_RDONLY | O_DIRECT);
-    if (src_fd < 0) {
-        perror("open source file");
-        goto cleanup;
-    }
-
-    snprintf(dst_path, sizeof(dst_path), "%s_fgds_rw_demo", file_path);
-    dst_fd = open(dst_path, O_CREAT | O_WRONLY | O_TRUNC | O_DIRECT, 0644);
-    if (dst_fd < 0) {
-        perror("open dest file");
-        goto cleanup;
-    }
-    if (ftruncate(dst_fd, (off_t)io_size) != 0) {
-        perror("ftruncate dest file");
+    fd = open(file_path, O_RDWR | O_DIRECT);
+    if (fd < 0) {
+        perror("open file");
         goto cleanup;
     }
 
@@ -142,20 +109,16 @@ int fgds_read_write_demo(int device_id, const char *file_path) {
         goto cleanup;
     }
 
-    src_fid.fd = src_fd;
-    src_fid.deviceID = device_id;
-    dst_fid.fd = dst_fd;
-    dst_fid.deviceID = device_id;
+    fid = {fd, device_id};
 
-    if (fgds_read(src_fid, gpu_buf, 0, (ssize_t)io_size, 0) != (ssize_t)io_size) {
+    if (fgds_read(fid, gpu_buf, 0, (ssize_t)io_size, 0) != (ssize_t)io_size) {
         fprintf(stderr, "fgds_read failed\n");
         goto cleanup;
     }
-    if (fgds_write(dst_fid, gpu_buf, 0, (ssize_t)io_size, 0) != (ssize_t)io_size) {
+    if (fgds_write(fid, gpu_buf, 0, (ssize_t)io_size, 0) != (ssize_t)io_size) {
         fprintf(stderr, "fgds_write failed\n");
         goto cleanup;
     }
-    fsync(dst_fd);
 
     printf("fgds_read_write_demo: fgds_read/fgds_write success\n");
     ret = 0;
@@ -164,12 +127,19 @@ cleanup:
     if (target_addr) fgds_deregmem(device_id, gpu_buf, io_size);
     if (gpu_buf) cudaFree(gpu_buf);
     fgds_close(device_id);
-    if (src_fd >= 0) close(src_fd);
-    if (dst_fd >= 0) close(dst_fd);
-    if (ret != 0 && dst_fd >= 0) unlink(dst_path);
+    if (fd >= 0) close(fd);
     return ret;
 }
 
+// 本示例以读写一个 4MB 文件为例。
+// 生成 4MB 测试文件的例子：dd if=/dev/urandom of=/data/test bs=1M count=4
+//
+// fgds_demo是基于pread/pwrite读写的，fgds_read_write_demo是基于fgds_read/write读写的。对于fgds，这2组api都可以用于读写。
+// fgds_read/write 与 pread/pwrite 的区别与联系：
+//   - fgds_read/write 内部最终会调用 pread/pwrite（在注册后的映射地址上做真正的 IO）。
+//   - 裸 pread/pwrite 一次只能读写 1GB 以内的数据（映射按 1GB 分段、段间不连续）。
+//   - fgds_read/write 内部实现了 io_uring 流水线，在较大 IO 上能显著提升吞吐。
+// 日常使用建议直接用 fgds_read/write，pread/pwrite 留给底层/自定义场景。
 int main(int argc, char *argv[]) {
     if (argc < 3) {
         printf("Usage: %s <gpu_id> <file_path>\n", argv[0]);
