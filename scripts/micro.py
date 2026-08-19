@@ -25,8 +25,6 @@ read_write = ["read", "write"]
 #read_write = ["read"]
 file_path = os.path.dirname(os.path.realpath(__file__))
 micro_exec = os.path.join(file_path, "..", "build", "bin", "microbenchmark")
-if os.path.dirname(file_path).startswith("/opt/fgds"):
-    micro_exec = os.path.join(file_path, "..", "bin", "microbenchmark")
 
 class test_config:
     def __init__(self):

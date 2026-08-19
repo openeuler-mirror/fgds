@@ -207,4 +207,5 @@ add_subdirectory ("${PROJECT_SOURCE_DIR}/benchmarks/micro-benchmarks")
 add_subdirectory ("${PROJECT_SOURCE_DIR}/benchmarks/safetensor")
 
 add_subdirectory ("${PROJECT_SOURCE_DIR}/example/")
+add_subdirectory ("${PROJECT_SOURCE_DIR}/tests/")
 

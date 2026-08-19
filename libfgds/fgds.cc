@@ -242,6 +242,8 @@ static inline int __fgds_regmem(fgds_mmap_buffer_t *mbuffer, u64 gpu_addr, u64 h
     return ret;
 }
 
+// 注册到 fgds_regmem 的缓冲长度都必须 64KB 正整数倍
+// 但是文件/传输层没有 FGDS 64KB 下限,只要 O_DIRECT 块对齐(4KB,个别盘 512B).例如注册 64KB buffer 后传输 4KB、用 4KB 文件是可以的
 int fgds_regmem(int device_id, const void *gpu_addr, size_t len, void **target_addr) {
     int i, ret = 0;
     unsigned long mmaped_len;
@@ -674,7 +676,50 @@ ssize_t fgds_write(fgds_fileid_t fid, void *gpu_buf, off_t buf_offset,
     return total_written; // // 返回本次 fgds_write调用累计成功写的总字节数
 }
 
-// 注册 buffer 超过 1G 时的读/写地址查询路径, 查询要读写的显存地址对应的用户态主机内存地址
+// fgds_do_xfer_addr：把一次 GPU<->文件 IO 的显存窗口翻译成一串 host 虚拟地址段表。
+//
+// 背景（来自 fgds_regmem）：
+//   注册长度为 len 的显存时（len 必须 64KB 对齐），因单次 mmap/ioctl 最多映射
+//   FGDS_MMAP_SEGMENT_SIZE=1GB，会把整块显存切成 mmap_count = ceil(len / 1GB) 段，
+//   每段 ≤1GB，各自一次 mmap 得到独立的 host VA（vaddrs[i]），再 ioctl 绑定
+//   [gpu_addr + i*1GB, +本段长度] ↔ vaddrs[i]。各段 host VA 之间不连续。
+//   regmem 返回的 target_addr 只是 vaddrs[0]（仅覆盖第 0 段）。
+//
+// 问题：
+//   访问 GPU 偏移 off 时不能直接 target_addr+off——一旦跨过 1GB 段边界就会落到
+//   另一段不相关的 host VA（mmap 间不连续），触发 EFAULT。必须用
+//   vaddrs[off/1GB] + (off % 1GB)。本函数就是做这个翻译：给定 IO 窗口
+//   [buf_offset, buf_offset+nbyte)（相对注册区起点的偏移），返回它跨越的每段的
+//   (host target_addr, nbyte)。
+//
+// 段数（nr_xfer_addrs）的计算：
+//   start = buf_offset / 1GB                  // 窗口起点落在第几个段
+//   end   = (buf_offset + nbyte - 1) / 1GB    // 窗口终点落在第几个段
+//   nr_xfer_addrs = end - start + 1           // 窗口跨越的段数
+//   即“窗口跨越了几个 regmem 建的 1GB 段”。注意：1GB 边界是相对注册区起点的偏移
+//   整数倍，与 GPU 绝对地址无关；段是否存在只取决于注册长度 len（len≤1GB 则恒 1 段，
+//   绝对 GPU 地址是 800MB 还是 0 不影响分段）。
+//
+//
+//   推论：当 nbyte < 1GB 时，窗口比 1GB 间距短，至多跨 1 个边界，故 nr_xfer_addrs ∈ {1,2}：
+//     1：窗口完全落在同一段内（len≤1GB 时必为 1）。
+//     2：窗口骑跨 1GB 段边界（仅 len>1GB 且窗口跨过相对偏移 1GB 整数倍位置才出现）。
+//
+//   例子：len=2GB（段0=偏移[0,1GB)、段1=[1GB,2GB)），IO buf_offset=768MB、nbyte=512MB
+//   → 窗口 [768MB, 1.28GB) 骑跨偏移 1GB → start=0, end=1, nr_xfer_addrs=2 → 2 次 pread：
+//     段0 target=vaddrs[0]+768MB、nbyte=1GB-768MB=256MB；
+//     段1 target=vaddrs[1]、nbyte=(768MB+512MB-1)%1GB+1=256MB，合计 512MB。
+//
+// 每段条目构造（for i 从 start 到 end）：
+//   首段 i==start：target = vaddrs[start] + (buf_offset % 1GB)；
+//                  nbyte  = (count>1 ? 1GB - (buf_offset % 1GB) : nbyte)   // 到段尾的剩余，单段时即整窗
+//   末段 i==end  ：target = vaddrs[end]；
+//                  nbyte  = (buf_offset + nbyte - 1) % 1GB + 1            // 末段占的字节数
+//   中间段        ：target = vaddrs[i]；nbyte = 1GB                       // 整段
+//   末尾校验 nbyte_left==0 且 nr_xfer_addrs==count，保证切片自洽。
+//
+// 调用方：fgds_read_direct/fgds_write_direct 对每个 x_addrs[] 做一次 pread/pwrite；
+//   io_uring 大 IO 路径按 256KB 子 IO 调本函数，每个子 IO 的 nr_xfer_addrs 至多 2。
 struct fgds_xfer_addr *fgds_do_xfer_addr(int device_id, const void *gpu_buf, off_t buf_offset, size_t nbyte) {
     struct fgds_xfer_addr *xfer_addr;
     fgds_mmap_buffer_t *_local_mbuffer = &g_dev_ctx[device_id];
