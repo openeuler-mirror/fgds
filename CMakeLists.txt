@@ -7,9 +7,8 @@ set (CMAKE_CUDA_STANDARD 20)
 set (CMAKE_CUDA_ARCHITECTURES 90)
 
 find_package (Threads REQUIRED)
-find_package (CUDA 12.4 REQUIRED)
-find_package (CUDAToolkit REQUIRED)
-find_library (CUFILE_LIBRARIES cufile ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
+find_package (CUDAToolkit 12.4 REQUIRED)
+find_library (CUFILE_LIBRARIES cufile ${CUDAToolkit_LIBRARY_DIR})
 find_library (DL_LIB dl REQUIRED)
 
 # 动态链接系统 liburing：写入 libfgds.so 的 DT_NEEDED，供 Python 加载时自动解析。
@@ -59,23 +58,11 @@ if (no_cc)
     set(CCUDA_NVCC_FLAGS "${CMAKE_C_FLAGS} -D__NO_COHERENCE__")
 endif ()
 
-# Detect system architecture for CUDA paths
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-    set(CUDA_ARCH_TARGET "sbsa-linux")
-    message(STATUS "Detected aarch64 architecture")
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-    set(CUDA_ARCH_TARGET "x86_64-linux")
-    message(STATUS "Detected x86_64 architecture")
-else()
-    message(WARNING "Unknown architecture: ${CMAKE_SYSTEM_PROCESSOR}, defaulting to x86_64-linux")
-    set(CUDA_ARCH_TARGET "x86_64-linux")
-endif()
-
 include_directories ("${PROJECT_SOURCE_DIR}/libfgds/include"
-                    "${CUDA_TOOLKIT_ROOT_DIR}/targets/${CUDA_ARCH_TARGET}/include/")
+                    "${CUDAToolkit_INCLUDE_DIRS}")
 
 # Try to find Nvidia driver
-if (CUDA_FOUND AND NOT no_cuda)
+if (CUDAToolkit_FOUND AND NOT no_cuda)
 
     # Try to find Nvidia headers (will choose the newest version)
     file (GLOB_RECURSE driver_paths "/usr/src/nvidia-*/nv-reg.h")
