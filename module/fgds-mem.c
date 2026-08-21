@@ -254,18 +254,22 @@ int fgds_map_dev_addr_inner(fgds_mmap_buffer_t mbuffer, u64 devaddr, u64 dev_len
     return ret;
     
 out:
-    if (gd != NULL)
+    if (gd != NULL) {
         kfree(gd);
         gd = NULL;
-    if (mbuffer->map != NULL)
+    }
+    if (mbuffer->map != NULL) {
         kfree(mbuffer->map);
         mbuffer->map = NULL;
-    if (mbuffer->ppages != NULL)
+    }
+    if (mbuffer->ppages != NULL) {
         kfree(mbuffer->ppages);
         mbuffer->ppages = NULL;
-    if (dev_page_addrs != NULL)
+    }
+    if (dev_page_addrs != NULL) {
         kfree(dev_page_addrs);
         dev_page_addrs = NULL;
+    }
     return ret;
 }
 

@@ -27,7 +27,6 @@
 
 // 在输入 file_path 的同目录下生成一个新文件（file_path + suffix），避免回写原文件。
 static void make_out_path(const char *in, const char *suffix, char *out, size_t n) {
-    size_t in_len = strlen(in);
     size_t suffix_len = strlen(suffix);
     strncpy(out, in, n - suffix_len - 1);
     out[n - suffix_len - 1] = '\0';
