@@ -18,3 +18,4 @@ compile_commands.json
 __pycache__/
 /third_party/liburing/
 /third_party/liburing-*.tar.gz
+gen-compile-commands.sh

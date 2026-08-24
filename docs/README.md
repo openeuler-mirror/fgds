@@ -86,11 +86,12 @@ pytorch-fgds/
 
 ### `scripts/` — Helper scripts
 
-Utility and benchmark-launch scripts. Includes the kernel module loader (`load_fgds.sh`), micro-benchmark runner.
+Utility and benchmark-launch scripts. Includes the kernel module loader (`load_fgds.sh`) / unloader (`unload_fgds.sh`), micro-benchmark runner.
 
 ```
 scripts/
 ├── load_fgds.sh            # Load fgdsfs.ko with GPU config from config.json
+├── unload_fgds.sh          # Unload the fgdsfs.ko module
 ├── micro.py                # Micro-benchmark runner (FGDS / GDS / POSIX comparison)
 ├── breakdown.sh / kvcache.sh / nfs.sh / nvme_of.sh  # Benchmark launch scripts
 ├── load_safetensors.py     # Safetensors loading helper

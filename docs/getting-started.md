@@ -93,5 +93,5 @@ Use a path on a filesystem that supports `O_DIRECT` (a local NVMe/SSD, not `/tmp
 ### 3.4 Unload the Kernel Module
 
 ```shell
-sudo rmmod fgdsfs
+bash scripts/unload_fgds.sh
 ```

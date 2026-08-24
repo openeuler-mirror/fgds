@@ -28,7 +28,7 @@ The FGDS build needs the NVIDIA driver source (`nv-reg.h` / `nv-p2p.h` under `/u
 
 ## Kernel module fails to unload
 
-If `sudo rmmod fgdsfs` reports `Module fgdsfs is in use`, some process still holds an open file descriptor or mmap mapping on `/dev/fgds_devX`. Exit all processes using FGDS, then unload again.
+If `scripts/unload_fgds.sh` (which runs `sudo rmmod fgdsfs`) reports `Module fgdsfs is in use`, some process still holds an open file descriptor or mmap mapping on `/dev/fgds_devX`. Exit all processes using FGDS, then unload again.
 
 ## Technical Details (optional)
 
