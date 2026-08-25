@@ -9,6 +9,7 @@ This directory contains FGDS documentation. Below is an overview of the project'
 | [getting-started.md](getting-started.md) | Build and run guide |
 | [fgds-fs.md](fgds-fs.md) | Kernel module (`fgdsfs.ko`) internals — char device, mmap, ioctl |
 | [libfgds.md](libfgds.md) | Userspace library API reference |
+| [fgds-fastsafetensor.md](fgds-fastsafetensor.md) | FastSafeTensors integration for high-performance model loading |
 | [micro-benchmark.md](micro-benchmark.md) | Micro benchmark program |
 | [troubleshooting.md](troubleshooting.md) | Troubleshooting guide for common issues |
 
