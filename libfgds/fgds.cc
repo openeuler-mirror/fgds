@@ -53,6 +53,7 @@ typedef struct fgds_mmap_buffer_s { // 管理一个GPU在libfgds中的显存映�
     pthread_mutex_t lock;
     struct io_uring uring;        // 每设备一个 ring，大 IO 时惰性初始化
     bool uring_init;              // uring 已完成初始化则为 true
+    pthread_mutex_t uring_lock;   // 保护 io_uring ring 的并发访问, TODO: 解决锁粒度太粗的问题
 } fgds_mmap_buffer_t;
 
 static int g_device_count = FGDS_MAX_DEVICES;
@@ -99,6 +100,7 @@ static int __fgds_close(fgds_mmap_buffer_t *mbuffer) {
 
     fgds_free_mmap_nodes(mbuffer);
     pthread_mutex_destroy(&mbuffer->lock);
+    pthread_mutex_destroy(&mbuffer->uring_lock);
     return 0;
 }
 
@@ -132,6 +134,7 @@ static int __fgds_open(const char *dev_path, fgds_mmap_buffer_t *mbuffer) {
     }
     mbuffer->head = NULL;
     pthread_mutex_init(&mbuffer->lock, NULL);
+    pthread_mutex_init(&mbuffer->uring_lock, NULL);
     mbuffer->initialized = true;
     mbuffer->uring_init = false;
     return 0;
@@ -446,21 +449,29 @@ ssize_t fgds_read(fgds_fileid_t fid, void *gpu_buf, off_t buf_offset,
 
     fgds_mmap_buffer_t *dev_mb = &g_dev_ctx[fid.deviceID];
 
-    // --- 每设备 io_uring ring 惰性初始化（仅一次）---
+    // --- 每设备 io_uring ring 惰性初始化（double-checked locking）---
     if (!dev_mb->uring_init) {
-        if (io_uring_queue_init(FGDS_URING_QD, &dev_mb->uring, 0) < 0) {
-            fprintf(stderr, "%s: io_uring_queue_init failed\n", __func__);
-            return -1;
+        pthread_mutex_lock(&dev_mb->uring_lock);
+        if (!dev_mb->uring_init) {
+            if (io_uring_queue_init(FGDS_URING_QD, &dev_mb->uring, 0) < 0) {
+                fprintf(stderr, "%s: io_uring_queue_init failed\n", __func__);
+                pthread_mutex_unlock(&dev_mb->uring_lock);
+                return -1;
+            }
+            dev_mb->uring_init = true;
         }
-        dev_mb->uring_init = true;
+        pthread_mutex_unlock(&dev_mb->uring_lock);
     }
 
     size_t  done       = 0; // 已经完成并提交过的批次累计的逻辑字节 （外层 while 跨批推进）
     ssize_t total_read = 0;
 
     while (done < (size_t)nbyte) {
+        pthread_mutex_lock(&dev_mb->uring_lock);
+
         int    sqe_count   = 0; // 本批已放入的 SQE 个数（受 FGDS_URING_QD 限制）
         size_t batch_bytes = 0; // 当前这一批（一个 io_uring submit 周期）已经规划进 SQ、准备一起提交给内核的逻辑字节数 （内层 while 内累加，每批从 0 开始）
+        int    batch_error = 0;
 
         // ---------- 阶段 1：向 SQ 填充子io请求 ----------
         while (sqe_count < FGDS_URING_QD && done + batch_bytes < (size_t)nbyte) {
@@ -479,7 +490,8 @@ ssize_t fgds_read(fgds_fileid_t fid, void *gpu_buf, off_t buf_offset,
             if (!xfer) {
                 fprintf(stderr, "%s: fgds_do_xfer_addr error at sub_buf_off=%ld\n",
                         __func__, sub_buf_off);
-                return -1;
+                batch_error = -1;
+                break;
             }
 
             // 每个 xfer 段对应一个 SQE,1个SQE就是一个子io；若会超过 ring 深度则先提交当前批
@@ -490,12 +502,16 @@ ssize_t fgds_read(fgds_fileid_t fid, void *gpu_buf, off_t buf_offset,
             }
 
             // 每个 xfer 段 → 一个 SQE
+            // 注意：在粗锁保护下，上一批 CQE 已全部 reap，且 sqe_count 受 FGDS_URING_QD 限制，
+            // SQ 必然有空位，io_uring_get_sqe 不会失败，无需重试逻辑
             for (uint32_t j = 0; j < xfer->nr_xfer_addrs; j++) {
                 struct io_uring_sqe *sqe = io_uring_get_sqe(&dev_mb->uring);
                 if (!sqe) {
-                    fprintf(stderr, "%s: io_uring_get_sqe failed\n", __func__);
+                    fprintf(stderr, "%s: unexpected SQE exhaustion (sqe_count=%d)\n",
+                            __func__, sqe_count);
                     std::free(xfer);
-                    return -1;
+                    batch_error = -1;
+                    break;
                 }
                 io_uring_prep_read(sqe, fid.fd,
                                    xfer->x_addrs[j].target_addr,
@@ -504,40 +520,83 @@ ssize_t fgds_read(fgds_fileid_t fid, void *gpu_buf, off_t buf_offset,
                 sub_f_off += (off_t)xfer->x_addrs[j].nbyte;
                 sqe_count++;
             }
+            if (batch_error) {
+                break;
+            }
             std::free(xfer);
             batch_bytes += sub_size;
         }
 
         // ---------- 阶段 2：提交本批 ----------
-        int submitted = io_uring_submit(&dev_mb->uring);
-        if (submitted < 0) {
-            fprintf(stderr, "%s: io_uring_submit failed\n", __func__);
-            return -1;
+        int submitted = 0;
+        if (!batch_error && sqe_count > 0) {
+            submitted = io_uring_submit(&dev_mb->uring);
+            if (submitted < 0) {
+                fprintf(stderr, "%s: io_uring_submit failed\n", __func__);
+                batch_error = -1;
+            }
         }
 
         // ---------- 阶段 3：回收完成事件 ----------
-        /* 本 for 循环原因：上面提交了 sqe_count 个 SQE，内核完成后会产生 sqe_count 个 CQE
+        /* 本 for 循环原因：上面提交了 submitted 个 SQE，内核完成后会产生 submitted 个 CQE
            （一一对应，完成顺序可以乱序）。本函数是 sync 语义：这一批必须全部读完才能继续下一批或返回。
-           todo: 这里是调io_uring_wait_cqe，1次调用等1个cqe，是串行等待，后续考虑优化
         */
-        for (int k = 0; k < sqe_count; k++) {
-            struct io_uring_cqe *cqe;
-            int wait_ret = io_uring_wait_cqe(&dev_mb->uring, &cqe); // 阻塞直到至少有一个 IO 完成，拿到 CQE
-            if (wait_ret < 0) {
-                fprintf(stderr, "%s: io_uring_wait_cqe failed\n", __func__);
-                return -1;
-            }
-            if (cqe->res < 0) {
-                fprintf(stderr, "%s: sub-read failed, ret=%d\n",
-                        __func__, cqe->res);
+        int cqe_reaped = 0;
+        if (!batch_error) {
+            for (int k = 0; k < submitted; k++) {
+                struct io_uring_cqe *cqe;
+                int wait_ret = io_uring_wait_cqe(&dev_mb->uring, &cqe);
+                if (wait_ret < 0) {
+                    fprintf(stderr, "%s: io_uring_wait_cqe failed\n", __func__);
+                    batch_error = -1;
+                    break;
+                }
+                cqe_reaped++;
+                if (cqe->res < 0) {
+                    fprintf(stderr, "%s: sub-read failed, ret=%d\n",
+                            __func__, cqe->res);
+                    io_uring_cqe_seen(&dev_mb->uring, cqe);
+                    batch_error = -1;
+                    break;
+                }
+                total_read += cqe->res;
                 io_uring_cqe_seen(&dev_mb->uring, cqe);
-                return -1;
             }
-            total_read += cqe->res; // cqe->res 是各自 CQE 读到的字节数，累加
-            io_uring_cqe_seen(&dev_mb->uring, cqe); // 标记这条 CQE 已处理，推进 CQ head
         }
 
-        done += batch_bytes; // 本批逻辑字节处理完，进入下一批
+        // ---------- 错误路径清理：reap掉本批所有剩余CQE，防止ring被污染卡死 ----------
+        if (batch_error && submitted > 0) {
+            // 先非阻塞peek并reap所有已经在CQ中的CQE
+            struct io_uring_cqe *cqe;
+            while (io_uring_peek_cqe(&dev_mb->uring, &cqe) == 0) {
+                io_uring_cqe_seen(&dev_mb->uring, cqe);
+                cqe_reaped++;
+            }
+            // 如果还有未完成的SQE（即CQE数量不足），需要等待并reap剩余的
+            // 因为内核已经收到这些SQE，它们最终一定会完成产生CQE，必须全部reap
+            while (cqe_reaped < submitted) {
+                int wait_ret = io_uring_wait_cqe(&dev_mb->uring, &cqe);
+                if (wait_ret < 0) {
+                    // wait_cqe失败，无法继续reap，只能放弃（ring可能已损坏）
+                    fprintf(stderr, "%s: failed to reap remaining CQEs during cleanup\n", __func__);
+                    break;
+                }
+                io_uring_cqe_seen(&dev_mb->uring, cqe);
+                cqe_reaped++;
+            }
+            pthread_mutex_unlock(&dev_mb->uring_lock);
+            return -1;
+        }
+
+        if (!batch_error) {
+            done += batch_bytes;
+        }
+
+        pthread_mutex_unlock(&dev_mb->uring_lock);
+
+        if (batch_error) {
+            return -1;
+        }
     }
 
     return total_read; // 返回本次 fgds_read 调用累计成功读到的总字节数
@@ -586,21 +645,29 @@ ssize_t fgds_write(fgds_fileid_t fid, void *gpu_buf, off_t buf_offset,
 
     fgds_mmap_buffer_t *dev_mb = &g_dev_ctx[fid.deviceID];
 
-    // --- 每设备 io_uring ring 惰性初始化（与 fgds_read 共用）---
+    // --- 每设备 io_uring ring 惰性初始化（double-checked locking，与 fgds_read 共用）---
     if (!dev_mb->uring_init) {
-        if (io_uring_queue_init(FGDS_URING_QD, &dev_mb->uring, 0) < 0) {
-            fprintf(stderr, "%s: io_uring_queue_init failed\n", __func__);
-            return -1;
+        pthread_mutex_lock(&dev_mb->uring_lock);
+        if (!dev_mb->uring_init) {
+            if (io_uring_queue_init(FGDS_URING_QD, &dev_mb->uring, 0) < 0) {
+                fprintf(stderr, "%s: io_uring_queue_init failed\n", __func__);
+                pthread_mutex_unlock(&dev_mb->uring_lock);
+                return -1;
+            }
+            dev_mb->uring_init = true;
         }
-        dev_mb->uring_init = true;
+        pthread_mutex_unlock(&dev_mb->uring_lock);
     }
 
     size_t  done        = 0; // 已经完成并提交过的批次累计的逻辑字节（外层 while 跨批推进）
     ssize_t total_written = 0;
 
     while (done < (size_t)nbyte) {
+        pthread_mutex_lock(&dev_mb->uring_lock);
+
         int    sqe_count   = 0;
         size_t batch_bytes = 0; // 本批正在组装中已装进 SQ 的逻辑字节（内层 while 内累加，每批从 0 开始）
+        int    batch_error = 0;
 
         // ---------- 阶段 1：向 SQ 填充子io请求 ----------
         while (sqe_count < FGDS_URING_QD && done + batch_bytes < (size_t)nbyte) {
@@ -618,7 +685,8 @@ ssize_t fgds_write(fgds_fileid_t fid, void *gpu_buf, off_t buf_offset,
             if (!xfer) {
                 fprintf(stderr, "%s: fgds_do_xfer_addr error at sub_buf_off=%ld\n",
                         __func__, sub_buf_off);
-                return -1;
+                batch_error = -1;
+                break;
             }
 
             // 每个 xfer 段对应一个 SQE；若会超过 ring 深度则先提交当前批
@@ -628,11 +696,14 @@ ssize_t fgds_write(fgds_fileid_t fid, void *gpu_buf, off_t buf_offset,
             }
 
             for (uint32_t j = 0; j < xfer->nr_xfer_addrs; j++) {
+                // 同 fgds_read：粗锁保护下 SQE 必然可用，无需重试逻辑
                 struct io_uring_sqe *sqe = io_uring_get_sqe(&dev_mb->uring);
                 if (!sqe) {
-                    fprintf(stderr, "%s: io_uring_get_sqe failed\n", __func__);
+                    fprintf(stderr, "%s: unexpected SQE exhaustion (sqe_count=%d)\n",
+                            __func__, sqe_count);
                     std::free(xfer);
-                    return -1;
+                    batch_error = -1;
+                    break;
                 }
                 io_uring_prep_write(sqe, fid.fd,
                                     xfer->x_addrs[j].target_addr,
@@ -641,39 +712,79 @@ ssize_t fgds_write(fgds_fileid_t fid, void *gpu_buf, off_t buf_offset,
                 sub_f_off += (off_t)xfer->x_addrs[j].nbyte;
                 sqe_count++;
             }
+            if (batch_error) {
+                break;
+            }
             std::free(xfer);
             batch_bytes += sub_size;
         }
 
         // ---------- 阶段 2：提交本批 ----------
-        int submitted = io_uring_submit(&dev_mb->uring);
-        if (submitted < 0) {
-            fprintf(stderr, "%s: io_uring_submit failed\n", __func__);
-            return -1;
+        int submitted = 0;
+        if (!batch_error && sqe_count > 0) {
+            submitted = io_uring_submit(&dev_mb->uring);
+            if (submitted < 0) {
+                fprintf(stderr, "%s: io_uring_submit failed\n", __func__);
+                batch_error = -1;
+            }
         }
 
         // ---------- 阶段 3：回收完成事件 ----------
-        for (int k = 0; k < sqe_count; k++) {
-            struct io_uring_cqe *cqe;
-            int wait_ret = io_uring_wait_cqe(&dev_mb->uring, &cqe);
-            if (wait_ret < 0) {
-                fprintf(stderr, "%s: io_uring_wait_cqe failed\n", __func__);
-                return -1;
-            }
-            if (cqe->res < 0) {
-                fprintf(stderr, "%s: sub-write failed, ret=%d\n",
-                        __func__, cqe->res);
+        int cqe_reaped = 0;
+        if (!batch_error) {
+            for (int k = 0; k < submitted; k++) {
+                struct io_uring_cqe *cqe;
+                int wait_ret = io_uring_wait_cqe(&dev_mb->uring, &cqe);
+                if (wait_ret < 0) {
+                    fprintf(stderr, "%s: io_uring_wait_cqe failed\n", __func__);
+                    batch_error = -1;
+                    break;
+                }
+                cqe_reaped++;
+                if (cqe->res < 0) {
+                    fprintf(stderr, "%s: sub-write failed, ret=%d\n",
+                            __func__, cqe->res);
+                    io_uring_cqe_seen(&dev_mb->uring, cqe);
+                    batch_error = -1;
+                    break;
+                }
+                total_written += cqe->res;
                 io_uring_cqe_seen(&dev_mb->uring, cqe);
-                return -1;
             }
-            total_written += cqe->res;
-            io_uring_cqe_seen(&dev_mb->uring, cqe);
         }
 
-        done += batch_bytes;
+        // ---------- 错误路径清理：reap掉本批所有剩余CQE，防止ring被污染卡死 ----------
+        if (batch_error && submitted > 0) {
+            struct io_uring_cqe *cqe;
+            while (io_uring_peek_cqe(&dev_mb->uring, &cqe) == 0) {
+                io_uring_cqe_seen(&dev_mb->uring, cqe);
+                cqe_reaped++;
+            }
+            while (cqe_reaped < submitted) {
+                int wait_ret = io_uring_wait_cqe(&dev_mb->uring, &cqe);
+                if (wait_ret < 0) {
+                    fprintf(stderr, "%s: failed to reap remaining CQEs during cleanup\n", __func__);
+                    break;
+                }
+                io_uring_cqe_seen(&dev_mb->uring, cqe);
+                cqe_reaped++;
+            }
+            pthread_mutex_unlock(&dev_mb->uring_lock);
+            return -1;
+        }
+
+        if (!batch_error) {
+            done += batch_bytes;
+        }
+
+        pthread_mutex_unlock(&dev_mb->uring_lock);
+
+        if (batch_error) {
+            return -1;
+        }
     }
 
-    return total_written; // // 返回本次 fgds_write调用累计成功写的总字节数
+    return total_written; // 返回本次 fgds_write调用累计成功写的总字节数
 }
 
 // fgds_do_xfer_addr：把一次 GPU<->文件 IO 的显存窗口翻译成一串 host 虚拟地址段表。

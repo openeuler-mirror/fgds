@@ -99,6 +99,7 @@ close(fd);
 | FGDS Python API | [python/README.md](./python/README.md) |
 | FGDS vLLM LMCache 后端 | [python/lmcache.md](./python/lmcache.md) |
 | PyTorch FGDS API | [pytorch-fgds/README.md](./pytorch-fgds/README.md) |
+| FastSafeTensors 模型加载 | [docs/fgds-fastsafetensor.md](./docs/fgds-fastsafetensor.md) |
 | 微benchmark | [docs/micro-benchmark.md](./docs/micro-benchmark.md) |
 
 ## 新闻
