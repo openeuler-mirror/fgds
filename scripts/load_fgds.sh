@@ -59,3 +59,5 @@ else
 	echo "Loading fgds with use_all_gpus=0 gpuids=$gpuids_param"
 	sudo insmod "$MOD_PATH" use_all_gpus=0 gpuids="$gpuids_param"
 fi
+
+grep -q "^$MODULE_NAME " /proc/modules && echo "$MODULE_NAME is loaded." || echo "warning: $MODULE_NAME is not loaded after insmod." >&2
