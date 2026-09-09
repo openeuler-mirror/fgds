@@ -93,7 +93,7 @@ Before the disk bandwidth is saturated, the read/write performance comparison is
 
 | Doc | Link |
 | --- | --- |
-| Build / Install | [docs/install.md](./docs/install.md) |
+| Getting Started | [docs/getting-started.md](./docs/getting-started.md) |
 | Kernel module and Character Device Interface | [docs/fgds-fs.md](./docs/fgds-fs.md) |
 | libfgds | [docs/libfgds.md](./docs/libfgds.md) |
 | FGDS Python API | [python/README.md](./python/README.md) |
