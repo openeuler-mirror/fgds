@@ -31,7 +31,7 @@ FGDS 是对 GDS 的优化替代方案，具备更高性能、更易部署、更�
 
 除 GPU 缓冲区注册（`fgds_regmem` / `fgds_deregmem`）外，文件 I/O 通过对已注册映射（`target_addr`）使用标准 POSIX `pread` / `pwrite` 完成。
 
-为简洁起见省略了错误检查与环境准备细节；完整可运行程序见 [example/example.cc](./example/example.cc)。
+为简洁起见省略了错误检查与环境准备细节；完整可运行程序见 [example/example.cc](../example/example.cc)。
 
 ```cpp
 int device_id = 0;
@@ -75,32 +75,32 @@ close(fd);
 
 ### 读带宽
 
-![读带宽](./picture/read_bandwidth.png)
+![读带宽](../picture/read_bandwidth.png)
 
 ### 写带宽
 
-![写带宽](./picture/write_bandwidth.png)
+![写带宽](../picture/write_bandwidth.png)
 
 ### 读时延
 
-![读时延](./picture/read_latency.png)
+![读时延](../picture/read_latency.png)
 
 ### 写时延
 
-![写时延](./picture/write_latency.png)
+![写时延](../picture/write_latency.png)
 
 ## 文档
 
 | 文档 | 链接 |
 | --- | --- |
-| 构建 / 安装 | [docs/install.md](./docs/install.md) |
-| 内核模块与字符设备接口 | [docs/fgds-fs.md](./docs/fgds-fs.md) |
-| libfgds | [docs/libfgds.md](./docs/libfgds.md) |
-| FGDS Python API | [python/README.md](./python/README.md) |
-| FGDS vLLM LMCache 后端 | [python/lmcache.md](./python/lmcache.md) |
-| PyTorch FGDS API | [pytorch-fgds/README.md](./pytorch-fgds/README.md) |
-| FastSafeTensors 模型加载 | [docs/fgds-fastsafetensor.md](./docs/fgds-fastsafetensor.md) |
-| 微benchmark | [docs/micro-benchmark.md](./docs/micro-benchmark.md) |
+| 快速开始 | [getting-started.md](getting-started.md) |
+| 内核模块与字符设备接口 | [fgds-fs.md](fgds-fs.md) |
+| libfgds | [libfgds.md](libfgds.md) |
+| FGDS Python API | [../python/README.md](../python/README.md) |
+| FGDS vLLM LMCache 后端 | [../python/lmcache.md](../python/lmcache.md) |
+| PyTorch FGDS API | [../pytorch-fgds/README.md](../pytorch-fgds/README.md) |
+| FastSafeTensors 模型加载 | [fgds-fastsafetensor.md](fgds-fastsafetensor.md) |
+| 微benchmark | [micro-benchmark.md](micro-benchmark.md) |
 
 ## 新闻
 
@@ -119,7 +119,7 @@ close(fd);
 
 `SPDX-License-Identifier: Apache-2.0`
 
-完整许可证文本见根目录 [LICENSE](./LICENSE)。
+完整许可证文本见根目录 [LICENSE](../LICENSE)。
 
 FGDS 基于 Apache License, Version 2.0（"License"）授权。
 您不得在不符合 License 的情况下使用本软件。
